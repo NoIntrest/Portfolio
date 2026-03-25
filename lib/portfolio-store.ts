@@ -1,6 +1,6 @@
 import "server-only";
 
-import { del, head, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
 
 import {
   DEFAULT_PORTFOLIO_CONTENT,
@@ -13,7 +13,8 @@ import {
   type PortfolioProject,
 } from "@/lib/portfolio-data";
 
-const PORTFOLIO_CONTENT_PATH = "portfolio/content.json";
+const LEGACY_PORTFOLIO_CONTENT_PATH = "portfolio/content.json";
+const PORTFOLIO_CONTENT_PREFIX = "portfolio/content/";
 const PROJECT_UPLOAD_PREFIX = "portfolio/projects";
 const PORTRAIT_UPLOAD_PREFIX = "portfolio/portrait";
 const MANAGED_BLOB_HOST_SUFFIX = ".public.blob.vercel-storage.com";
@@ -96,6 +97,58 @@ async function uploadImage(file: File, kind: "portrait" | "project") {
   return uploaded.url;
 }
 
+function getVersionedContentPath() {
+  return `${PORTFOLIO_CONTENT_PREFIX}${Date.now()}-${crypto.randomUUID()}.json`;
+}
+
+async function readContentBlob(pathname: string) {
+  const result = await get(pathname, { access: "public" });
+
+  if (!result || result.statusCode !== 200 || !result.stream) {
+    return null;
+  }
+
+  const raw = await new Response(result.stream).text();
+  return normalizePortfolioContent(JSON.parse(raw) as unknown);
+}
+
+async function getLatestContentPath() {
+  const { blobs } = await list({
+    prefix: PORTFOLIO_CONTENT_PREFIX,
+  });
+
+  if (!blobs.length) {
+    return null;
+  }
+
+  const latest = [...blobs].sort(
+    (left, right) =>
+      new Date(right.uploadedAt).getTime() - new Date(left.uploadedAt).getTime(),
+  )[0];
+
+  return latest?.pathname ?? null;
+}
+
+async function cleanupOldContentBlobs(currentPath: string) {
+  const { blobs } = await list({
+    prefix: PORTFOLIO_CONTENT_PREFIX,
+  });
+  const stalePaths = blobs
+    .filter((blob) => blob.pathname !== currentPath)
+    .sort(
+      (left, right) =>
+        new Date(right.uploadedAt).getTime() - new Date(left.uploadedAt).getTime(),
+    )
+    .slice(4)
+    .map((blob) => blob.pathname);
+
+  if (!stalePaths.length) {
+    return;
+  }
+
+  await del(stalePaths);
+}
+
 export function isPortfolioStorageConfigured() {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
@@ -106,15 +159,18 @@ export async function getPortfolioContent(): Promise<PortfolioContent> {
   }
 
   try {
-    const blob = await head(PORTFOLIO_CONTENT_PATH);
-    const response = await fetch(blob.url, { cache: "no-store" });
+    const latestPath = await getLatestContentPath();
 
-    if (!response.ok) {
-      return DEFAULT_PORTFOLIO_CONTENT;
+    if (latestPath) {
+      const content = await readContentBlob(latestPath);
+
+      if (content) {
+        return content;
+      }
     }
 
-    const data = (await response.json()) as unknown;
-    return normalizePortfolioContent(data);
+    const legacyContent = await readContentBlob(LEGACY_PORTFOLIO_CONTENT_PATH);
+    return legacyContent ?? DEFAULT_PORTFOLIO_CONTENT;
   } catch {
     return DEFAULT_PORTFOLIO_CONTENT;
   }
@@ -128,12 +184,21 @@ async function savePortfolioContent(content: PortfolioContent) {
     projects: content.projects,
   });
 
-  await put(PORTFOLIO_CONTENT_PATH, JSON.stringify(nextContent, null, 2), {
-    access: "public",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: "application/json",
-  });
+  const uploaded = await put(
+    getVersionedContentPath(),
+    JSON.stringify(nextContent, null, 2),
+    {
+      access: "public",
+      addRandomSuffix: false,
+      contentType: "application/json",
+    },
+  );
+
+  try {
+    await cleanupOldContentBlobs(uploaded.pathname);
+  } catch {
+    // Best-effort cleanup only. The latest content has already been saved.
+  }
 
   return nextContent;
 }
