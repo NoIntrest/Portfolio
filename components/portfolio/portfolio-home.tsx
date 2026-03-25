@@ -2,43 +2,60 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import {
-  ArrowDownRight,
-  LockKeyhole,
-  Sparkles,
-  WandSparkles,
-} from "lucide-react";
+import { ArrowDownRight, LockKeyhole, Sparkles } from "lucide-react";
 
 import { ProfilePhoto } from "@/components/portfolio/profile-photo";
 import { ProjectShowcase } from "@/components/portfolio/project-showcase";
 import { Button } from "@/components/ui/button";
-import { Component as AnimatedWeatherIcons } from "@/components/ui/animated-weather-icons";
 import { FallingPattern } from "@/components/ui/falling-pattern";
 import {
-  DEFAULT_PROJECTS,
-  PROJECTS_UPDATED_EVENT,
-  getStoredProjects,
-  type PortfolioProject,
-} from "@/lib/portfolio-storage";
+  DEFAULT_PORTFOLIO_CONTENT,
+  normalizePortfolioContent,
+  type PortfolioContent,
+} from "@/lib/portfolio-data";
 
-export function PortfolioHome() {
-  const [projects, setProjects] = useState<PortfolioProject[]>(DEFAULT_PROJECTS);
+interface PortfolioHomeProps {
+  initialContent: PortfolioContent;
+}
+
+export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
+  const [content, setContent] = useState<PortfolioContent>(initialContent);
 
   useEffect(() => {
-    const syncProjects = () => {
-      setProjects(getStoredProjects());
+    setContent(initialContent);
+  }, [initialContent]);
+
+  useEffect(() => {
+    let active = true;
+
+    const syncPortfolio = async () => {
+      try {
+        const response = await fetch("/api/portfolio", { cache: "no-store" });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as { content?: unknown };
+
+        if (active && payload.content) {
+          setContent(normalizePortfolioContent(payload.content));
+        }
+      } catch {
+        // Use the server-rendered content if the refresh request fails.
+      }
     };
 
-    syncProjects();
-    window.addEventListener(PROJECTS_UPDATED_EVENT, syncProjects as EventListener);
+    void syncPortfolio();
 
     return () => {
-      window.removeEventListener(
-        PROJECTS_UPDATED_EVENT,
-        syncProjects as EventListener,
-      );
+      active = false;
     };
   }, []);
+
+  const projects = content.projects.length
+    ? content.projects
+    : DEFAULT_PORTFOLIO_CONTENT.projects;
 
   return (
     <main className="overflow-x-hidden">
@@ -71,7 +88,9 @@ export function PortfolioHome() {
                 <a href="#projects">Projects</a>
               </Button>
               <Button asChild className="rounded-full">
-                <Link href="/admin">Host login</Link>
+                <Link href="/admin" prefetch={false}>
+                  Host login
+                </Link>
               </Button>
             </nav>
           </header>
@@ -80,18 +99,20 @@ export function PortfolioHome() {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-xs text-primary/90">
                 <Sparkles className="h-4 w-4" />
-                Built with shadcn structure, Tailwind, and TypeScript
+                Web and mobile developer
               </div>
 
               <h1 className="mt-8 max-w-4xl font-serif text-5xl leading-none tracking-tight text-foreground sm:text-6xl lg:text-7xl">
-                Warm light, clean motion, and a portfolio you can update after
-                launch.
+                Building real-world applications from the ground up.
               </h1>
 
               <p className="mt-6 max-w-2xl text-base leading-8 text-white/70">
-                The design takes cues from your portrait: deep shadow, soft gold
-                highlights, and a calm cinematic mood. Projects on the page are
-                editable from the host panel with a passkey-backed local login.
+                I&apos;m a developer who enjoys building real-world applications
+                from the ground up. I work across web and mobile technologies,
+                creating products that are functional, clean, and user-focused.
+                From developing a gym management system to working on finance
+                tracking tools, I focus on solving practical problems and
+                continuously improving my skills through hands-on projects.
               </p>
 
               <div className="mt-9 flex flex-wrap items-center gap-4">
@@ -102,7 +123,7 @@ export function PortfolioHome() {
                   </a>
                 </Button>
                 <Button asChild size="lg" variant="outline" className="rounded-full">
-                  <Link href="/admin">
+                  <Link href="/admin" prefetch={false}>
                     Open host editor
                     <LockKeyhole className="h-4 w-4" />
                   </Link>
@@ -121,7 +142,7 @@ export function PortfolioHome() {
                     Auth mode
                   </p>
                   <p className="mt-3 text-lg font-medium text-white/80">
-                    Passkey ready
+                    Server-backed
                   </p>
                 </div>
                 <div className="rounded-[1.5rem] border border-border/70 bg-card/55 p-4 backdrop-blur-sm">
@@ -135,7 +156,7 @@ export function PortfolioHome() {
               </div>
             </div>
 
-            <ProfilePhoto />
+            <ProfilePhoto portraitImage={content.portraitImage} />
           </div>
         </div>
       </section>
@@ -158,24 +179,6 @@ export function PortfolioHome() {
         </div>
 
         <ProjectShowcase projects={projects} />
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 pb-24 lg:px-10">
-        <div className="overflow-hidden rounded-[2.5rem] border border-border/70 bg-card/55 backdrop-blur-md">
-          <div className="flex items-center gap-3 border-b border-border/70 px-8 py-6">
-            <WandSparkles className="h-5 w-5 text-primary" />
-            <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-primary/75">
-                Atmosphere
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                A playful motion section using the animated weather icon set you
-                asked to integrate.
-              </p>
-            </div>
-          </div>
-          <AnimatedWeatherIcons />
-        </div>
       </section>
     </main>
   );

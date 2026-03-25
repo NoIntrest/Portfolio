@@ -5,12 +5,12 @@ export interface PortfolioProject {
   description: string;
 }
 
-export const PROJECTS_STORAGE_KEY = "abhi-portfolio-projects";
-export const PROJECTS_UPDATED_EVENT = "abhi-portfolio-projects-updated";
-export const PASSKEY_STORAGE_KEY = "abhi-portfolio-passkey-id";
-export const ADMIN_SESSION_KEY = "abhi-portfolio-admin-session";
-export const PORTRAIT_STORAGE_KEY = "abhi-portfolio-portrait";
-export const PORTRAIT_UPDATED_EVENT = "abhi-portfolio-portrait-updated";
+export interface PortfolioContent {
+  portraitImage: string | null;
+  projects: PortfolioProject[];
+  updatedAt: string;
+}
+
 export const PORTRAIT_IMAGE_PATHS = [
   "/profile-photo.jpg",
   "/profile-photo.jpeg",
@@ -75,6 +75,12 @@ export const DEFAULT_PROJECTS: PortfolioProject[] = [
   },
 ];
 
+export const DEFAULT_PORTFOLIO_CONTENT: PortfolioContent = {
+  portraitImage: null,
+  projects: DEFAULT_PROJECTS,
+  updatedAt: "1970-01-01T00:00:00.000Z",
+};
+
 function isProject(value: unknown): value is PortfolioProject {
   if (!value || typeof value !== "object") {
     return false;
@@ -90,53 +96,57 @@ function isProject(value: unknown): value is PortfolioProject {
   );
 }
 
-export function getStoredProjects() {
-  if (typeof window === "undefined") {
-    return DEFAULT_PROJECTS;
-  }
-
-  const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
-
-  if (!raw) {
-    return DEFAULT_PROJECTS;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-
-    if (Array.isArray(parsed)) {
-      const projects = parsed.filter(isProject);
-      return projects;
-    }
-  } catch {
-    return DEFAULT_PROJECTS;
-  }
-
-  return DEFAULT_PROJECTS;
+function normalizeProject(project: PortfolioProject): PortfolioProject {
+  return {
+    id: project.id.trim(),
+    image: project.image.trim(),
+    url: project.url.trim(),
+    description: project.description.trim(),
+  };
 }
 
-export function saveProjects(projects: PortfolioProject[]) {
-  window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-  window.dispatchEvent(new CustomEvent(PROJECTS_UPDATED_EVENT, { detail: projects }));
-}
-
-export function getStoredPortraitImage() {
-  if (typeof window === "undefined") {
+function trimToNull(value: string | null | undefined) {
+  if (typeof value !== "string") {
     return null;
   }
 
-  const value = window.localStorage.getItem(PORTRAIT_STORAGE_KEY);
-  return value && value.trim() ? value : null;
+  const trimmed = value.trim();
+  return trimmed || null;
 }
 
-export function savePortraitImage(value: string) {
-  window.localStorage.setItem(PORTRAIT_STORAGE_KEY, value);
-  window.dispatchEvent(new CustomEvent(PORTRAIT_UPDATED_EVENT, { detail: value }));
+export function normalizePortfolioContent(value: unknown): PortfolioContent {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_PORTFOLIO_CONTENT;
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawProjects = record.projects;
+  const projects = Array.isArray(rawProjects)
+    ? rawProjects.filter(isProject).map(normalizeProject)
+    : DEFAULT_PROJECTS;
+  const portraitImage = trimToNull(record.portraitImage as string | null | undefined);
+  const updatedAt =
+    typeof record.updatedAt === "string" && record.updatedAt.trim()
+      ? record.updatedAt
+      : DEFAULT_PORTFOLIO_CONTENT.updatedAt;
+
+  return {
+    portraitImage,
+    projects,
+    updatedAt,
+  };
 }
 
-export function clearPortraitImage() {
-  window.localStorage.removeItem(PORTRAIT_STORAGE_KEY);
-  window.dispatchEvent(new CustomEvent(PORTRAIT_UPDATED_EVENT, { detail: null }));
+export function buildPortfolioContent(input: {
+  portraitImage?: string | null;
+  projects?: PortfolioProject[];
+  updatedAt?: string;
+}): PortfolioContent {
+  return normalizePortfolioContent({
+    portraitImage: input.portraitImage ?? null,
+    projects: input.projects ?? DEFAULT_PROJECTS,
+    updatedAt: input.updatedAt ?? new Date().toISOString(),
+  });
 }
 
 export function getProjectLabel(url: string) {
@@ -148,35 +158,44 @@ export function getProjectLabel(url: string) {
   }
 }
 
-export function getStoredPasskeyId() {
-  if (typeof window === "undefined") {
+export function normalizeWebsiteUrl(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
     return null;
   }
 
-  return window.localStorage.getItem(PASSKEY_STORAGE_KEY);
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    const url = new URL(candidate);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
-export function savePasskeyId(value: string) {
-  window.localStorage.setItem(PASSKEY_STORAGE_KEY, value);
-}
+export function normalizeRemoteImageUrl(value: string) {
+  const trimmed = value.trim();
 
-export function clearPasskeyId() {
-  window.localStorage.removeItem(PASSKEY_STORAGE_KEY);
-}
-
-export function hasAdminSession() {
-  if (typeof window === "undefined") {
-    return false;
+  if (!trimmed) {
+    return null;
   }
 
-  return window.sessionStorage.getItem(ADMIN_SESSION_KEY) === "active";
-}
+  try {
+    const url = new URL(trimmed);
 
-export function setAdminSession(active: boolean) {
-  if (active) {
-    window.sessionStorage.setItem(ADMIN_SESSION_KEY, "active");
-    return;
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
   }
-
-  window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -15,257 +16,399 @@ import {
 import { Button } from "@/components/ui/button";
 import { FallingPattern } from "@/components/ui/falling-pattern";
 import {
-  DEFAULT_PROJECTS,
-  clearPasskeyId,
   getProjectLabel,
-  getStoredPasskeyId,
-  getStoredProjects,
-  hasAdminSession,
-  savePasskeyId,
-  saveProjects,
-  setAdminSession,
+  type PortfolioContent,
   type PortfolioProject,
-} from "@/lib/portfolio-storage";
+} from "@/lib/portfolio-data";
+
+interface AdminSessionState {
+  authenticated: boolean;
+  configured: boolean;
+  storageConfigured: boolean;
+}
+
+interface AdminPanelProps {
+  initialContent: PortfolioContent;
+  initialSession: AdminSessionState;
+}
 
 interface FormState {
-  image: string;
+  imageUrl: string;
   url: string;
   description: string;
 }
 
 const EMPTY_FORM: FormState = {
-  image: "",
+  imageUrl: "",
   url: "",
   description: "",
 };
 
-function arrayBufferToBase64Url(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
+async function parseJsonResponse<T>(response: Response) {
+  const payload = (await response.json().catch(() => null)) as
+    | { error?: string }
+    | null;
 
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
+  if (!response.ok) {
+    const error = new Error(payload?.error ?? "Something went wrong.") as Error & {
+      status?: number;
+    };
+    error.status = response.status;
+    throw error;
+  }
 
-  return window
-    .btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return payload as T;
 }
 
-function base64UrlToArrayBuffer(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
-  const binary = window.atob(normalized + padding);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return bytes.buffer;
-}
-
-function createChallenge() {
-  return crypto.getRandomValues(new Uint8Array(32));
-}
-
-export function AdminPanel() {
-  const [projects, setProjects] = useState<PortfolioProject[]>(DEFAULT_PROJECTS);
+export function AdminPanel({
+  initialContent,
+  initialSession,
+}: AdminPanelProps) {
+  const router = useRouter();
+  const [projects, setProjects] = useState<PortfolioProject[]>(
+    initialContent.projects,
+  );
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [projectImageFile, setProjectImageFile] = useState<File | null>(null);
+  const [projectImagePreview, setProjectImagePreview] = useState("");
+  const [savedPortraitImage, setSavedPortraitImage] = useState(
+    initialContent.portraitImage ?? "",
+  );
+  const [portraitInput, setPortraitInput] = useState(
+    initialContent.portraitImage ?? "",
+  );
+  const [portraitFile, setPortraitFile] = useState<File | null>(null);
+  const [portraitPreview, setPortraitPreview] = useState(
+    initialContent.portraitImage ?? "",
+  );
+  const [password, setPassword] = useState("");
   const [status, setStatus] = useState<string>("");
   const [isBusy, setIsBusy] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [hasPasskey, setHasPasskey] = useState(false);
-  const [supportsPasskeys, setSupportsPasskeys] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    initialSession.authenticated,
+  );
+  const [isConfigured, setIsConfigured] = useState(initialSession.configured);
+  const [storageConfigured, setStorageConfigured] = useState(
+    initialSession.storageConfigured,
+  );
 
   useEffect(() => {
-    setProjects(getStoredProjects());
-    setHasPasskey(Boolean(getStoredPasskeyId()));
-    setIsAuthenticated(hasAdminSession());
-    setSupportsPasskeys(
-      typeof window !== "undefined" &&
-        "PublicKeyCredential" in window &&
-        typeof navigator.credentials?.create === "function" &&
-        typeof navigator.credentials?.get === "function",
-    );
-  }, []);
+    setProjects(initialContent.projects);
+    setSavedPortraitImage(initialContent.portraitImage ?? "");
+    setPortraitInput(initialContent.portraitImage ?? "");
+    setPortraitPreview(initialContent.portraitImage ?? "");
+  }, [initialContent]);
+
+  useEffect(() => {
+    setIsAuthenticated(initialSession.authenticated);
+    setIsConfigured(initialSession.configured);
+    setStorageConfigured(initialSession.storageConfigured);
+  }, [initialSession]);
+
+  useEffect(() => {
+    return () => {
+      if (projectImagePreview.startsWith("blob:")) {
+        URL.revokeObjectURL(projectImagePreview);
+      }
+    };
+  }, [projectImagePreview]);
+
+  useEffect(() => {
+    return () => {
+      if (portraitPreview.startsWith("blob:")) {
+        URL.revokeObjectURL(portraitPreview);
+      }
+    };
+  }, [portraitPreview]);
 
   const resetStatus = (message: string) => {
     setStatus(message);
   };
 
-  const registerPasskey = async () => {
-    if (!supportsPasskeys) {
-      resetStatus("Passkeys are only available on https or localhost in supported browsers.");
-      return;
+  const handleRequestError = (error: unknown) => {
+    const message =
+      error instanceof Error ? error.message : "Something went wrong.";
+    const statusCode =
+      error && typeof error === "object" && "status" in error
+        ? Number((error as { status?: number }).status)
+        : null;
+
+    if (statusCode === 401) {
+      setIsAuthenticated(false);
     }
 
-    try {
-      setIsBusy(true);
-      resetStatus("Creating your host passkey...");
-
-      const userId = crypto.getRandomValues(new Uint8Array(16));
-      const challenge = createChallenge();
-
-      const credential = (await navigator.credentials.create({
-        publicKey: {
-          rp: {
-            name: "Abhi Portfolio Host",
-          },
-          user: {
-            id: userId,
-            name: "host@portfolio.local",
-            displayName: "Portfolio Host",
-          },
-          challenge,
-          pubKeyCredParams: [
-            { type: "public-key", alg: -7 },
-            { type: "public-key", alg: -257 },
-          ],
-          timeout: 60_000,
-          attestation: "none",
-          authenticatorSelection: {
-            residentKey: "preferred",
-            userVerification: "preferred",
-          },
-        },
-      })) as PublicKeyCredential | null;
-
-      if (!credential) {
-        throw new Error("Passkey creation was cancelled.");
-      }
-
-      savePasskeyId(arrayBufferToBase64Url(credential.rawId));
-      setAdminSession(true);
-      setHasPasskey(true);
-      setIsAuthenticated(true);
-      resetStatus("Passkey created. Your host editor is unlocked on this device.");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to create a passkey.";
-      resetStatus(message);
-    } finally {
-      setIsBusy(false);
-    }
+    resetStatus(message);
   };
 
-  const unlockWithPasskey = async () => {
-    const passkeyId = getStoredPasskeyId();
+  const applyContent = (content: PortfolioContent) => {
+    setProjects(content.projects);
 
-    if (!passkeyId) {
-      resetStatus("Create a host passkey first.");
-      return;
-    }
-
-    try {
-      setIsBusy(true);
-      resetStatus("Waiting for passkey verification...");
-
-      const credential = await navigator.credentials.get({
-        publicKey: {
-          challenge: createChallenge(),
-          timeout: 60_000,
-          userVerification: "preferred",
-          allowCredentials: [
-            {
-              id: base64UrlToArrayBuffer(passkeyId),
-              type: "public-key",
-            },
-          ],
-        },
-      });
-
-      if (!credential) {
-        throw new Error("Passkey verification was cancelled.");
-      }
-
-      setAdminSession(true);
-      setIsAuthenticated(true);
-      resetStatus("Host access granted.");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to verify your passkey.";
-      resetStatus(message);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const logout = () => {
-    setAdminSession(false);
-    setIsAuthenticated(false);
-    resetStatus("Host session closed.");
+    const nextPortraitImage = content.portraitImage ?? "";
+    setSavedPortraitImage(nextPortraitImage);
+    setPortraitInput(nextPortraitImage);
+    setPortraitFile(null);
+    setPortraitPreview(nextPortraitImage);
+    router.refresh();
   };
 
   const handleFieldChange = (
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     const { name, value } = event.target;
+
+    if (name === "imageUrl") {
+      setProjectImageFile(null);
+      setProjectImagePreview("");
+    }
+
     setForm((current) => ({ ...current, [name]: value }));
   };
 
-  const handleImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleProjectImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
 
     if (!file) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const image = typeof reader.result === "string" ? reader.result : "";
-      setForm((current) => ({ ...current, image }));
-      resetStatus("Image loaded. Save the entry when you are ready.");
-    };
-    reader.readAsDataURL(file);
+    setProjectImageFile(file);
+    setForm((current) => ({ ...current, imageUrl: "" }));
+    setProjectImagePreview(URL.createObjectURL(file));
+    resetStatus("Image loaded. Save the entry when you are ready.");
   };
 
-  const addProject = (event: FormEvent<HTMLFormElement>) => {
+  const addProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!form.image || !form.url || !form.description.trim()) {
+    if (!isAuthenticated || !storageConfigured) {
+      return;
+    }
+
+    if ((!projectImageFile && !form.imageUrl.trim()) || !form.url || !form.description.trim()) {
       resetStatus("Add an image, website link, and description before saving.");
       return;
     }
 
-    let normalizedUrl = form.url.trim();
-    if (!/^https?:\/\//i.test(normalizedUrl)) {
-      normalizedUrl = `https://${normalizedUrl}`;
+    try {
+      setIsBusy(true);
+      resetStatus("Saving the project to shared storage...");
+
+      const body = new FormData();
+      body.set("url", form.url);
+      body.set("description", form.description);
+
+      if (projectImageFile) {
+        body.set("imageFile", projectImageFile);
+      } else {
+        body.set("imageUrl", form.imageUrl);
+      }
+
+      const response = await fetch("/api/admin/projects", {
+        method: "POST",
+        body,
+      });
+      const payload = await parseJsonResponse<{
+        content: PortfolioContent;
+      }>(response);
+
+      applyContent(payload.content);
+      setForm(EMPTY_FORM);
+      setProjectImageFile(null);
+      setProjectImagePreview("");
+      resetStatus("Project added to the shared portfolio.");
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handlePortraitUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
     }
 
-    const nextProjects: PortfolioProject[] = [
-      {
-        id: crypto.randomUUID(),
-        image: form.image,
-        url: normalizedUrl,
-        description: form.description.trim(),
-      },
-      ...projects,
-    ];
-
-    saveProjects(nextProjects);
-    setProjects(nextProjects);
-    setForm(EMPTY_FORM);
-    resetStatus("Project added to the portfolio.");
+    setPortraitFile(file);
+    setPortraitInput("");
+    setPortraitPreview(URL.createObjectURL(file));
+    resetStatus("Portrait loaded. Save it when you are ready.");
   };
 
-  const removeProject = (projectId: string) => {
-    const nextProjects = projects.filter((project) => project.id !== projectId);
-    saveProjects(nextProjects);
-    setProjects(nextProjects);
-    resetStatus("Project removed.");
+  const savePortrait = async () => {
+    if (!isAuthenticated || !storageConfigured) {
+      return;
+    }
+
+    if (!portraitFile && !portraitInput.trim()) {
+      resetStatus("Upload a portrait or paste an image URL before saving.");
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      resetStatus("Updating the shared portrait...");
+
+      const body = new FormData();
+
+      if (portraitFile) {
+        body.set("imageFile", portraitFile);
+      } else {
+        body.set("imageUrl", portraitInput);
+      }
+
+      const response = await fetch("/api/admin/portrait", {
+        method: "PUT",
+        body,
+      });
+      const payload = await parseJsonResponse<{
+        content: PortfolioContent;
+      }>(response);
+
+      applyContent(payload.content);
+      resetStatus("Portrait updated on the homepage.");
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setIsBusy(false);
+    }
   };
 
-  const resetProjects = () => {
-    saveProjects(DEFAULT_PROJECTS);
-    setProjects(DEFAULT_PROJECTS);
-    resetStatus("The sample showcase has been restored.");
+  const removePortrait = async () => {
+    if (!isAuthenticated || !storageConfigured) {
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      resetStatus("Removing the portrait...");
+
+      const response = await fetch("/api/admin/portrait", {
+        method: "DELETE",
+      });
+      const payload = await parseJsonResponse<{
+        content: PortfolioContent;
+      }>(response);
+
+      applyContent(payload.content);
+      setPortraitInput("");
+      setPortraitPreview("");
+      resetStatus("Portrait removed. The placeholder is back.");
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setIsBusy(false);
+    }
   };
 
-  const resetPasskey = () => {
-    clearPasskeyId();
-    setAdminSession(false);
-    setHasPasskey(false);
-    setIsAuthenticated(false);
-    resetStatus("Stored passkey removed from this browser.");
+  const removeProject = async (projectId: string) => {
+    if (!isAuthenticated || !storageConfigured) {
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      resetStatus("Removing the project...");
+
+      const response = await fetch(`/api/admin/projects/${projectId}`, {
+        method: "DELETE",
+      });
+      const payload = await parseJsonResponse<{
+        content: PortfolioContent;
+      }>(response);
+
+      applyContent(payload.content);
+      resetStatus("Project removed.");
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setIsBusy(false);
+    }
   };
+
+  const resetProjects = async () => {
+    if (!isAuthenticated || !storageConfigured) {
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      resetStatus("Restoring the sample showcase...");
+
+      const response = await fetch("/api/admin/projects/reset", {
+        method: "POST",
+      });
+      const payload = await parseJsonResponse<{
+        content: PortfolioContent;
+      }>(response);
+
+      applyContent(payload.content);
+      resetStatus("The sample showcase has been restored.");
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const login = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!password.trim()) {
+      resetStatus("Enter the admin password to continue.");
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      resetStatus("Signing in...");
+
+      const response = await fetch("/api/admin/session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password }),
+      });
+      const payload = await parseJsonResponse<AdminSessionState>(response);
+
+      setIsAuthenticated(payload.authenticated);
+      setIsConfigured(payload.configured);
+      setStorageConfigured(payload.storageConfigured);
+      setPassword("");
+      router.refresh();
+
+      if (payload.storageConfigured) {
+        resetStatus("Host access granted. Shared editing is ready.");
+      } else {
+        resetStatus("Host access granted. Connect Vercel Blob to enable shared storage.");
+      }
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      setIsBusy(true);
+      await fetch("/api/admin/session", {
+        method: "DELETE",
+      });
+      setIsAuthenticated(false);
+      setPassword("");
+      router.refresh();
+      resetStatus("Host session closed.");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const canEdit = isAuthenticated && storageConfigured;
+  const portraitDisplay = portraitPreview || savedPortraitImage || "/profile-placeholder.svg";
+  const projectPreview = projectImagePreview || form.imageUrl;
 
   return (
     <main className="relative min-h-screen overflow-hidden">
@@ -293,7 +436,7 @@ export function AdminPanel() {
           </div>
           <div className="flex items-center gap-2">
             <Button asChild variant="ghost" className="rounded-full">
-              <Link href="/">
+              <Link href="/" prefetch={false}>
                 <ArrowLeft className="h-4 w-4" />
                 Back to site
               </Link>
@@ -318,13 +461,12 @@ export function AdminPanel() {
               Access
             </p>
             <h1 className="mt-4 font-serif text-4xl text-foreground">
-              Passkey-based host login
+              Shared host login
             </h1>
             <p className="mt-4 text-sm leading-7 text-muted-foreground">
-              This editor uses WebAuthn in the browser so you can protect the
-              host controls with a passkey on localhost or a secure deployed
-              origin. For a fully production-hardened flow, pair this UI with a
-              backend that verifies WebAuthn signatures server-side.
+              This admin now writes to shared server storage so updates show up
+              for everyone who visits the site. Sign in with the server-side
+              admin password before you edit anything.
             </p>
 
             <div className="mt-8 rounded-[1.5rem] border border-border/70 bg-background/45 p-5">
@@ -332,38 +474,44 @@ export function AdminPanel() {
                 <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
                 <div>
                   <p className="text-sm font-medium text-white/85">
-                    Browser support
+                    Server configuration
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {supportsPasskeys
-                      ? "Passkey APIs are available in this browser."
-                      : "Passkeys are unavailable here. Use https or localhost in a modern browser."}
+                    {!isConfigured
+                      ? "Set ADMIN_PASSWORD in your environment to unlock this editor."
+                      : !storageConfigured
+                        ? "Admin auth is ready, but BLOB_READ_WRITE_TOKEN is still missing."
+                        : "Admin auth and shared storage are both configured."}
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="mt-6 space-y-3">
-              {!hasPasskey ? (
-                <Button
-                  type="button"
-                  onClick={registerPasskey}
-                  disabled={isBusy || !supportsPasskeys}
-                  className="w-full rounded-full"
-                >
-                  <KeyRound className="h-4 w-4" />
-                  Create host passkey
-                </Button>
-              ) : !isAuthenticated ? (
-                <Button
-                  type="button"
-                  onClick={unlockWithPasskey}
-                  disabled={isBusy || !supportsPasskeys}
-                  className="w-full rounded-full"
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  Unlock editor with passkey
-                </Button>
+              {!isAuthenticated ? (
+                <form className="space-y-3" onSubmit={login}>
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-white/80">
+                      Admin password
+                    </span>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="Enter your admin password"
+                      className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                      disabled={!isConfigured || isBusy}
+                    />
+                  </label>
+                  <Button
+                    type="submit"
+                    disabled={!isConfigured || isBusy}
+                    className="w-full rounded-full"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    Sign in to edit
+                  </Button>
+                </form>
               ) : (
                 <Button type="button" disabled className="w-full rounded-full">
                   <ShieldCheck className="h-4 w-4" />
@@ -371,14 +519,16 @@ export function AdminPanel() {
                 </Button>
               )}
 
-              {hasPasskey ? (
+              {isAuthenticated ? (
                 <Button
                   type="button"
                   variant="outline"
                   className="w-full rounded-full"
-                  onClick={resetPasskey}
+                  onClick={logout}
+                  disabled={isBusy}
                 >
-                  Reset stored passkey
+                  <LogOut className="h-4 w-4" />
+                  Logout
                 </Button>
               ) : null}
             </div>
@@ -405,39 +555,121 @@ export function AdminPanel() {
                 variant="ghost"
                 className="rounded-full"
                 onClick={resetProjects}
-                disabled={!isAuthenticated}
+                disabled={!canEdit || isBusy}
               >
                 Reset sample content
               </Button>
             </div>
 
-            {!isAuthenticated ? (
+            {!canEdit ? (
               <div className="mt-8 rounded-[1.5rem] border border-dashed border-border/70 bg-background/35 p-8 text-center">
                 <ImagePlus className="mx-auto h-10 w-10 text-primary/70" />
                 <p className="mt-4 text-lg font-medium text-white/85">
-                  Unlock the editor to add your work
+                  {isAuthenticated
+                    ? "Finish your server setup to publish shared updates"
+                    : "Sign in to add your work"}
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Each entry stores an image, a website link, and a description.
+                  {isAuthenticated
+                    ? "Connect Vercel Blob so images and portfolio data persist for every visitor."
+                    : "Each entry stores an image, a website link, and a description."}
                 </p>
               </div>
             ) : (
               <>
+                <div className="mt-8 rounded-[1.5rem] border border-border/70 bg-background/35 p-5">
+                  <div className="flex flex-wrap items-end justify-between gap-4">
+                    <div>
+                      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-primary/75">
+                        Portrait
+                      </p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Upload your profile image here and the hero section will
+                        update instantly.
+                      </p>
+                    </div>
+                    <div className="overflow-hidden rounded-2xl border border-white/8 bg-black/25">
+                      <img
+                        src={portraitDisplay}
+                        alt="Portrait preview"
+                        className="h-24 w-20 bg-black object-contain"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-5 md:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-medium text-white/80">
+                        Upload portrait image
+                      </span>
+                      <div className="flex items-center gap-3 rounded-2xl border border-dashed border-input bg-background/45 px-4 py-3">
+                        <Upload className="h-4 w-4 text-primary" />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePortraitUpload}
+                          disabled={isBusy}
+                          className="w-full text-sm text-muted-foreground file:mr-3 file:rounded-full file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
+                        />
+                      </div>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-medium text-white/80">
+                        Or paste a portrait URL
+                      </span>
+                      <input
+                        type="url"
+                        value={portraitFile ? "" : portraitInput}
+                        onChange={(event) => {
+                          setPortraitFile(null);
+                          setPortraitInput(event.target.value);
+                          setPortraitPreview(event.target.value.trim());
+                        }}
+                        placeholder="https://images.example.com/portrait.jpg"
+                        className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                        disabled={isBusy}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <Button
+                      type="button"
+                      className="rounded-full"
+                      onClick={savePortrait}
+                      disabled={isBusy}
+                    >
+                      Save portrait
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={removePortrait}
+                      disabled={isBusy || (!savedPortraitImage && !portraitPreview)}
+                    >
+                      Remove portrait
+                    </Button>
+                  </div>
+                </div>
+
                 <form className="mt-8 space-y-5" onSubmit={addProject}>
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="space-y-2">
                       <span className="text-sm font-medium text-white/80">
                         Website link
                       </span>
-                      <input
-                        name="url"
-                        type="url"
-                        value={form.url}
-                        onChange={handleFieldChange}
-                        placeholder="https://your-site.com"
-                        className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
-                      />
-                    </label>
+                        <input
+                          name="url"
+                          type="url"
+                          value={form.url}
+                          onChange={handleFieldChange}
+                          placeholder="https://your-site.com"
+                          className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                          disabled={isBusy}
+                        />
+                      </label>
 
                     <label className="space-y-2">
                       <span className="text-sm font-medium text-white/80">
@@ -448,7 +680,8 @@ export function AdminPanel() {
                         <input
                           type="file"
                           accept="image/*"
-                          onChange={handleImageUpload}
+                          onChange={handleProjectImageUpload}
+                          disabled={isBusy}
                           className="w-full text-sm text-muted-foreground file:mr-3 file:rounded-full file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
                         />
                       </div>
@@ -460,12 +693,13 @@ export function AdminPanel() {
                       Or paste an image URL
                     </span>
                     <input
-                      name="image"
+                      name="imageUrl"
                       type="url"
-                      value={form.image.startsWith("data:") ? "" : form.image}
+                      value={projectImageFile ? "" : form.imageUrl}
                       onChange={handleFieldChange}
                       placeholder="https://images.example.com/preview.jpg"
                       className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                      disabled={isBusy}
                     />
                   </label>
 
@@ -480,10 +714,25 @@ export function AdminPanel() {
                       onChange={handleFieldChange}
                       placeholder="Describe the project, what it does, and why it matters."
                       className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                      disabled={isBusy}
                     />
                   </label>
 
-                  <Button type="submit" className="w-full rounded-full">
+                  {projectPreview ? (
+                    <div className="overflow-hidden rounded-[1.5rem] border border-border/70 bg-background/35 p-3">
+                      <img
+                        src={projectPreview}
+                        alt="Project preview"
+                        className="aspect-[16/10] w-full rounded-[1.2rem] object-cover"
+                      />
+                    </div>
+                  ) : null}
+
+                  <Button
+                    type="submit"
+                    className="w-full rounded-full"
+                    disabled={isBusy}
+                  >
                     Save portfolio entry
                   </Button>
                 </form>
@@ -517,6 +766,7 @@ export function AdminPanel() {
                           type="button"
                           variant="ghost"
                           className="rounded-full"
+                          disabled={isBusy}
                           onClick={() => removeProject(project.id)}
                         >
                           <Trash2 className="h-4 w-4" />

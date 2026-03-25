@@ -10,7 +10,7 @@ const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 export const metadata: Metadata = {
   title: "Abhi Portfolio",
   description:
-    "A motion-driven portfolio with passkey-gated project editing and shadcn-compatible components.",
+    "Developer building real-world web and mobile applications that are functional, clean, and user-focused.",
 };
 
 export default function RootLayout({
@@ -19,8 +19,12 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="en" className={cn("dark", "font-sans", geist.variable)}>
-      <body>{children}</body>
+    <html
+      lang="en"
+      className={cn("dark", "font-sans", geist.variable)}
+      suppressHydrationWarning
+    >
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

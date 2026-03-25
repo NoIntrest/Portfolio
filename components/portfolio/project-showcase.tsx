@@ -7,7 +7,7 @@ import { ArrowUpRight, Globe2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import WheelPagination from "@/components/ui/wheel-pagination";
-import { getProjectLabel, type PortfolioProject } from "@/lib/portfolio-storage";
+import { getProjectLabel, type PortfolioProject } from "@/lib/portfolio-data";
 
 interface ProjectShowcaseProps {
   projects: PortfolioProject[];
@@ -25,8 +25,9 @@ export function ProjectShowcase({ projects }: ProjectShowcaseProps) {
       <div className="rounded-[2rem] border border-dashed border-border/70 bg-card/45 p-10 text-center">
         <p className="font-serif text-3xl text-foreground">No projects yet</p>
         <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground">
-          Open the admin page, register your passkey, and add a website image,
-          link, and description. Your showcase will update here instantly.
+          Open the admin page, sign in, and add a website image, link, and
+          description. New entries are saved to the shared portfolio for all
+          visitors.
         </p>
       </div>
     );
