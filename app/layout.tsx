@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
-  title: "Abhi Portfolio",
+  title: "Harshak Kumar BM Portfolio",
   description:
-    "Developer building real-world web and mobile applications that are functional, clean, and user-focused.",
+    "Portfolio website for Harshak Kumar BM, featuring editable profile details and project showcases.",
 };
 
 export default function RootLayout({

@@ -75,7 +75,7 @@ export function ProfilePhoto({ portraitImage = null }: ProfilePhotoProps) {
         </p>
         {usingFallback ? (
           <p className="mt-2 text-xs text-white/55">
-            Upload your portrait from the host editor, or add it to{" "}
+            Upload your portrait from the portfolio editor, or add it to{" "}
             <code>/public</code> as <code>profile-photo.jpg</code>,{" "}
             <code>profile-photo.png</code>, or <code>profile.jpg</code>.
           </p>

@@ -38,11 +38,29 @@ interface FormState {
   description: string;
 }
 
+interface ProfileFormState {
+  fullName: string;
+  role: string;
+  bio: string;
+  email: string;
+  location: string;
+}
+
 const EMPTY_FORM: FormState = {
   imageUrl: "",
   url: "",
   description: "",
 };
+
+function buildProfileForm(content: PortfolioContent): ProfileFormState {
+  return {
+    fullName: content.profile.fullName,
+    role: content.profile.role,
+    bio: content.profile.bio,
+    email: content.profile.email,
+    location: content.profile.location,
+  };
+}
 
 async function parseJsonResponse<T>(response: Response) {
   const payload = (await response.json().catch(() => null)) as
@@ -67,6 +85,9 @@ export function AdminPanel({
   const router = useRouter();
   const [projects, setProjects] = useState<PortfolioProject[]>(
     initialContent.projects,
+  );
+  const [profileForm, setProfileForm] = useState<ProfileFormState>(
+    buildProfileForm(initialContent),
   );
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [projectImageFile, setProjectImageFile] = useState<File | null>(null);
@@ -94,6 +115,7 @@ export function AdminPanel({
 
   useEffect(() => {
     setProjects(initialContent.projects);
+    setProfileForm(buildProfileForm(initialContent));
     setSavedPortraitImage(initialContent.portraitImage ?? "");
     setPortraitInput(initialContent.portraitImage ?? "");
     setPortraitPreview(initialContent.portraitImage ?? "");
@@ -142,6 +164,7 @@ export function AdminPanel({
 
   const applyContent = (content: PortfolioContent) => {
     setProjects(content.projects);
+    setProfileForm(buildProfileForm(content));
 
     const nextPortraitImage = content.portraitImage ?? "";
     setSavedPortraitImage(nextPortraitImage);
@@ -162,6 +185,14 @@ export function AdminPanel({
     }
 
     setForm((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleProfileFieldChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    const { name, value } = event.target;
+
+    setProfileForm((current) => ({ ...current, [name]: value }));
   };
 
   const handleProjectImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
@@ -216,6 +247,35 @@ export function AdminPanel({
       setProjectImageFile(null);
       setProjectImagePreview("");
       resetStatus("Project added to the shared portfolio.");
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const saveProfile = async () => {
+    if (!isAuthenticated || !storageConfigured) {
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      resetStatus("Updating your profile details...");
+
+      const response = await fetch("/api/admin/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(profileForm),
+      });
+      const payload = await parseJsonResponse<{
+        content: PortfolioContent;
+      }>(response);
+
+      applyContent(payload.content);
+      resetStatus("Profile details updated on the homepage.");
     } catch (error) {
       handleRequestError(error);
     } finally {
@@ -380,9 +440,9 @@ export function AdminPanel({
       router.refresh();
 
       if (payload.storageConfigured) {
-        resetStatus("Host access granted. Shared editing is ready.");
+        resetStatus("Admin access granted. Shared editing is ready.");
       } else {
-        resetStatus("Host access granted. Connect Vercel Blob to enable shared storage.");
+        resetStatus("Admin access granted. Connect Vercel Blob to enable shared storage.");
       }
     } catch (error) {
       handleRequestError(error);
@@ -400,7 +460,7 @@ export function AdminPanel({
       setIsAuthenticated(false);
       setPassword("");
       router.refresh();
-      resetStatus("Host session closed.");
+      resetStatus("Admin session closed.");
     } finally {
       setIsBusy(false);
     }
@@ -428,10 +488,10 @@ export function AdminPanel({
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-full border border-white/8 bg-black/20 px-5 py-3 backdrop-blur-md">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-primary/80">
-              Host editor
+              Portfolio editor
             </p>
             <p className="mt-1 text-xs text-white/60">
-              Add portfolio image, link, and description from this panel
+              Update your profile details, portrait, and project links here
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -461,7 +521,7 @@ export function AdminPanel({
               Access
             </p>
             <h1 className="mt-4 font-serif text-4xl text-foreground">
-              Shared host login
+              Shared admin login
             </h1>
             <p className="mt-4 text-sm leading-7 text-muted-foreground">
               This admin now writes to shared server storage so updates show up
@@ -547,7 +607,7 @@ export function AdminPanel({
                   Portfolio data
                 </p>
                 <h2 className="mt-4 font-serif text-3xl text-foreground">
-                  Add and manage website entries
+                  Manage your profile and projects
                 </h2>
               </div>
               <Button
@@ -572,11 +632,110 @@ export function AdminPanel({
                 <p className="mt-2 text-sm text-muted-foreground">
                   {isAuthenticated
                     ? "Connect Vercel Blob so images and portfolio data persist for every visitor."
-                    : "Each entry stores an image, a website link, and a description."}
+                    : "Sign in to edit your profile details, portrait, and project entries."}
                 </p>
               </div>
             ) : (
               <>
+                <div className="mt-8 rounded-[1.5rem] border border-border/70 bg-background/35 p-5">
+                  <div className="flex flex-wrap items-end justify-between gap-4">
+                    <div>
+                      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-primary/75">
+                        Profile details
+                      </p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        This section controls the name, role, bio, email, and
+                        location shown on your homepage.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      className="rounded-full"
+                      onClick={saveProfile}
+                      disabled={isBusy}
+                    >
+                      Save profile details
+                    </Button>
+                  </div>
+
+                  <div className="mt-5 grid gap-5 md:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-medium text-white/80">
+                        Full name
+                      </span>
+                      <input
+                        name="fullName"
+                        type="text"
+                        value={profileForm.fullName}
+                        onChange={handleProfileFieldChange}
+                        placeholder="Harshak Kumar BM"
+                        className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                        disabled={isBusy}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-medium text-white/80">
+                        Professional title
+                      </span>
+                      <input
+                        name="role"
+                        type="text"
+                        value={profileForm.role}
+                        onChange={handleProfileFieldChange}
+                        placeholder="Full-stack developer"
+                        className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                        disabled={isBusy}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-medium text-white/80">
+                        Email address
+                      </span>
+                      <input
+                        name="email"
+                        type="email"
+                        value={profileForm.email}
+                        onChange={handleProfileFieldChange}
+                        placeholder="your-email@example.com"
+                        className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                        disabled={isBusy}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-medium text-white/80">
+                        Location
+                      </span>
+                      <input
+                        name="location"
+                        type="text"
+                        value={profileForm.location}
+                        onChange={handleProfileFieldChange}
+                        placeholder="City, Country"
+                        className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                        disabled={isBusy}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="mt-5 block space-y-2">
+                    <span className="text-sm font-medium text-white/80">
+                      About you
+                    </span>
+                    <textarea
+                      name="bio"
+                      rows={5}
+                      value={profileForm.bio}
+                      onChange={handleProfileFieldChange}
+                      placeholder="Write a short introduction that explains who you are and what kind of work you do."
+                      className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                      disabled={isBusy}
+                    />
+                  </label>
+                </div>
+
                 <div className="mt-8 rounded-[1.5rem] border border-border/70 bg-background/35 p-5">
                   <div className="flex flex-wrap items-end justify-between gap-4">
                     <div>
@@ -660,16 +819,16 @@ export function AdminPanel({
                       <span className="text-sm font-medium text-white/80">
                         Website link
                       </span>
-                        <input
-                          name="url"
-                          type="url"
-                          value={form.url}
-                          onChange={handleFieldChange}
-                          placeholder="https://your-site.com"
-                          className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
-                          disabled={isBusy}
-                        />
-                      </label>
+                      <input
+                        name="url"
+                        type="url"
+                        value={form.url}
+                        onChange={handleFieldChange}
+                        placeholder="https://your-site.com"
+                        className="w-full rounded-2xl border border-input bg-background/65 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                        disabled={isBusy}
+                      />
+                    </label>
 
                     <label className="space-y-2">
                       <span className="text-sm font-medium text-white/80">

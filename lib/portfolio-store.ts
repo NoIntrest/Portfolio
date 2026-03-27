@@ -10,6 +10,7 @@ import {
   normalizeRemoteImageUrl,
   normalizeWebsiteUrl,
   type PortfolioContent,
+  type PortfolioProfile,
   type PortfolioProject,
 } from "@/lib/portfolio-data";
 
@@ -181,6 +182,7 @@ async function savePortfolioContent(content: PortfolioContent) {
 
   const nextContent = buildPortfolioContent({
     portraitImage: trimToNull(content.portraitImage),
+    profile: content.profile,
     projects: content.projects,
   });
 
@@ -275,6 +277,19 @@ export async function resetProjects() {
   await Promise.allSettled(
     current.projects.map((project) => deleteManagedBlob(project.image, PROJECT_UPLOAD_PREFIX)),
   );
+
+  return content;
+}
+
+export async function updateProfile(input: Partial<PortfolioProfile>) {
+  const current = await getPortfolioContent();
+  const content = await savePortfolioContent({
+    ...current,
+    profile: {
+      ...current.profile,
+      ...input,
+    },
+  });
 
   return content;
 }

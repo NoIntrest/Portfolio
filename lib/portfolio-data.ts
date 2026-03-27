@@ -5,8 +5,17 @@ export interface PortfolioProject {
   description: string;
 }
 
+export interface PortfolioProfile {
+  fullName: string;
+  role: string;
+  bio: string;
+  email: string;
+  location: string;
+}
+
 export interface PortfolioContent {
   portraitImage: string | null;
+  profile: PortfolioProfile;
   projects: PortfolioProject[];
   updatedAt: string;
 }
@@ -75,8 +84,18 @@ export const DEFAULT_PROJECTS: PortfolioProject[] = [
   },
 ];
 
+export const DEFAULT_PROFILE: PortfolioProfile = {
+  fullName: "Harshak Kumar BM",
+  role: "Full-stack developer",
+  bio:
+    "This portfolio now belongs to Harshak Kumar BM. Use the portfolio editor to add your own introduction, contact details, and the work you want to highlight.",
+  email: "your-email@example.com",
+  location: "Your location",
+};
+
 export const DEFAULT_PORTFOLIO_CONTENT: PortfolioContent = {
   portraitImage: null,
+  profile: DEFAULT_PROFILE,
   projects: DEFAULT_PROJECTS,
   updatedAt: "1970-01-01T00:00:00.000Z",
 };
@@ -114,17 +133,37 @@ function trimToNull(value: string | null | undefined) {
   return trimmed || null;
 }
 
+function normalizeProfileField(value: unknown, fallback: string) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || fallback;
+}
+
 export function normalizePortfolioContent(value: unknown): PortfolioContent {
   if (!value || typeof value !== "object") {
     return DEFAULT_PORTFOLIO_CONTENT;
   }
 
   const record = value as Record<string, unknown>;
+  const rawProfile =
+    record.profile && typeof record.profile === "object"
+      ? (record.profile as Record<string, unknown>)
+      : {};
   const rawProjects = record.projects;
   const projects = Array.isArray(rawProjects)
     ? rawProjects.filter(isProject).map(normalizeProject)
     : DEFAULT_PROJECTS;
   const portraitImage = trimToNull(record.portraitImage as string | null | undefined);
+  const profile: PortfolioProfile = {
+    fullName: normalizeProfileField(rawProfile.fullName, DEFAULT_PROFILE.fullName),
+    role: normalizeProfileField(rawProfile.role, DEFAULT_PROFILE.role),
+    bio: normalizeProfileField(rawProfile.bio, DEFAULT_PROFILE.bio),
+    email: normalizeProfileField(rawProfile.email, DEFAULT_PROFILE.email),
+    location: normalizeProfileField(rawProfile.location, DEFAULT_PROFILE.location),
+  };
   const updatedAt =
     typeof record.updatedAt === "string" && record.updatedAt.trim()
       ? record.updatedAt
@@ -132,6 +171,7 @@ export function normalizePortfolioContent(value: unknown): PortfolioContent {
 
   return {
     portraitImage,
+    profile,
     projects,
     updatedAt,
   };
@@ -139,11 +179,16 @@ export function normalizePortfolioContent(value: unknown): PortfolioContent {
 
 export function buildPortfolioContent(input: {
   portraitImage?: string | null;
+  profile?: Partial<PortfolioProfile>;
   projects?: PortfolioProject[];
   updatedAt?: string;
 }): PortfolioContent {
   return normalizePortfolioContent({
     portraitImage: input.portraitImage ?? null,
+    profile: {
+      ...DEFAULT_PROFILE,
+      ...input.profile,
+    },
     projects: input.projects ?? DEFAULT_PROJECTS,
     updatedAt: input.updatedAt ?? new Date().toISOString(),
   });

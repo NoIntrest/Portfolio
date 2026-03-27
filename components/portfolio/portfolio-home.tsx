@@ -56,6 +56,7 @@ export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
   const projects = content.projects.length
     ? content.projects
     : DEFAULT_PORTFOLIO_CONTENT.projects;
+  const profile = content.profile;
 
   return (
     <main className="overflow-x-hidden">
@@ -76,10 +77,10 @@ export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
           <header className="flex items-center justify-between gap-4 rounded-full border border-white/8 bg-black/20 px-5 py-3 backdrop-blur-md">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-primary/80">
-                Abhi Portfolio
+                {profile.fullName}&apos;s Portfolio
               </p>
               <p className="mt-1 text-xs text-white/60">
-                Motion-first showcase with host controls
+                Editable developer portfolio and project showcase
               </p>
             </div>
 
@@ -89,7 +90,7 @@ export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
               </Button>
               <Button asChild className="rounded-full">
                 <Link href="/admin" prefetch={false}>
-                  Host login
+                  Portfolio editor
                 </Link>
               </Button>
             </nav>
@@ -99,20 +100,15 @@ export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-xs text-primary/90">
                 <Sparkles className="h-4 w-4" />
-                Web and mobile developer
+                {profile.role}
               </div>
 
               <h1 className="mt-8 max-w-4xl font-serif text-5xl leading-none tracking-tight text-foreground sm:text-6xl lg:text-7xl">
-                Building real-world applications from the ground up.
+                {profile.fullName}
               </h1>
 
               <p className="mt-6 max-w-2xl text-base leading-8 text-white/70">
-                I&apos;m a developer who enjoys building real-world applications
-                from the ground up. I work across web and mobile technologies,
-                creating products that are functional, clean, and user-focused.
-                From developing a gym management system to working on finance
-                tracking tools, I focus on solving practical problems and
-                continuously improving my skills through hands-on projects.
+                {profile.bio}
               </p>
 
               <div className="mt-9 flex flex-wrap items-center gap-4">
@@ -124,7 +120,7 @@ export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
                 </Button>
                 <Button asChild size="lg" variant="outline" className="rounded-full">
                   <Link href="/admin" prefetch={false}>
-                    Open host editor
+                    Edit portfolio details
                     <LockKeyhole className="h-4 w-4" />
                   </Link>
                 </Button>
@@ -139,18 +135,18 @@ export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
                 </div>
                 <div className="rounded-[1.5rem] border border-border/70 bg-card/55 p-4 backdrop-blur-sm">
                   <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-primary/75">
-                    Auth mode
+                    Email
                   </p>
-                  <p className="mt-3 text-lg font-medium text-white/80">
-                    Server-backed
+                  <p className="mt-3 break-all text-lg font-medium text-white/80">
+                    {profile.email}
                   </p>
                 </div>
                 <div className="rounded-[1.5rem] border border-border/70 bg-card/55 p-4 backdrop-blur-sm">
                   <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-primary/75">
-                    Visual system
+                    Location
                   </p>
                   <p className="mt-3 text-lg font-medium text-white/80">
-                    Motion + mood
+                    {profile.location}
                   </p>
                 </div>
               </div>
@@ -172,9 +168,9 @@ export function PortfolioHome({ initialContent }: PortfolioHomeProps) {
             </h2>
           </div>
           <p className="max-w-xl text-sm leading-7 text-muted-foreground">
-            Scroll the pagination, tap the dots, or update entries in the host
-            panel. Every card uses the same three editable fields: image, web
-            link, and description.
+            Scroll the pagination, tap the dots, or update entries in the
+            portfolio editor. Every card uses the same three editable fields:
+            image, web link, and description.
           </p>
         </div>
 
